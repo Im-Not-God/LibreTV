@@ -64,6 +64,8 @@ class TVRemoteController {
         if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter', ' '].includes(e.key)) {
             e.preventDefault();
         }
+
+        console.log(`Key pressed: ${e.key}, focused element: ${focused ? focused.tagName : 'none'}`);
         
         switch(e.key) {
             case 'Enter':
