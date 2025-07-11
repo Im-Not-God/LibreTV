@@ -1027,3 +1027,191 @@ body {
         font-size: 0.8rem;
     }
 }
+
+/* 在文件末尾添加完整的TV遥控器支持样式 */
+
+/* ===== TV Remote Control Support Styles ===== */
+
+/* TV模式指示器 */
+#tv-mode-indicator {
+    animation: pulse 2s infinite;
+}
+
+/* 基础焦点样式 */
+.focusable:focus,
+.focusable.focused {
+    outline: 3px solid #ff6b6b !important;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.3) !important;
+    z-index: 10;
+    position: relative;
+}
+
+/* 确保所有交互元素都有焦点样式 */
+button:focus, 
+input:focus, 
+a:focus, 
+[tabindex]:focus {
+    outline: 3px solid #ff6b6b !important;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.3) !important;
+}
+
+/* 复选框特殊焦点样式 */
+input[type="checkbox"]:focus {
+    outline: 3px solid #ff6b6b !important;
+    outline-offset: 2px;
+}
+
+/* 搜索标签焦点样式 */
+.search-tag:focus {
+    outline: 3px solid #ff6b6b !important;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.3) !important;
+    transform: scale(1.05);
+}
+
+/* 卡片焦点样式增强 */
+.card-hover:focus {
+    outline: 3px solid #ff6b6b !important;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.3), 0 4px 20px rgba(255, 107, 107, 0.2) !important;
+    transform: translateY(-3px) scale(1.02);
+    transition: all 0.2s ease;
+}
+
+/* 豆瓣卡片焦点样式 */
+.douban-card:focus {
+    outline: 3px solid #ff6b6b !important;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.3) !important;
+    transform: scale(1.05);
+}
+
+/* 模态框内的焦点样式 */
+.modal .focusable:focus,
+.settings-panel .focusable:focus,
+.history-panel .focusable:focus,
+#passwordModal .focusable:focus,
+#disclaimerModal .focusable:focus {
+    outline-color: #60a5fa !important;
+    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.3) !important;
+}
+
+/* TV环境下的特殊样式 */
+@media (min-width: 1920px), (min-height: 1080px) {
+    .focusable:focus {
+        transform: scale(1.05);
+        transition: transform 0.2s ease;
+    }
+    
+    .card-hover:focus {
+        transform: scale(1.08) translateY(-5px) !important;
+        box-shadow: 0 0 20px rgba(255, 107, 107, 0.5) !important;
+    }
+    
+    .douban-card:focus {
+        transform: scale(1.1) !important;
+    }
+    
+    /* TV环境下增大点击目标 */
+    button, .card-hover, .search-tag, .focusable {
+        min-height: 44px;
+        min-width: 44px;
+    }
+}
+
+/* 豆瓣区域按钮焦点样式 */
+#douban-tags .focusable:focus,
+#douban-movie-toggle:focus,
+#douban-tv-toggle:focus,
+#douban-refresh:focus {
+    outline: 3px solid #ff6b6b !important;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.3) !important;
+}
+
+/* 设置面板中开关的焦点样式 */
+#yellowFilterToggle:focus + .toggle-bg,
+#adFilterToggle:focus + .toggle-bg,
+#doubanToggle:focus + .toggle-bg {
+    box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.3) !important;
+    outline: 2px solid #ff6b6b !important;
+}
+
+/* 搜索输入框特殊样式 */
+#searchInput:focus {
+    outline: 3px solid #00ccff !important;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px rgba(0, 204, 255, 0.3) !important;
+}
+
+/* 隐藏默认的浏览器焦点样式 */
+*:focus {
+    outline: none;
+}
+
+/* 为动态生成的元素确保焦点样式 */
+#results .focusable:focus,
+#douban-results .focusable:focus,
+#recentSearches .focusable:focus {
+    outline: 3px solid #ff6b6b !important;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.3) !important;
+}
+
+/* 播放器页面的特殊焦点样式 */
+.art-video-player .focusable:focus,
+.art-control .focusable:focus {
+    outline: 3px solid #00ff00 !important;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px rgba(0, 255, 0, 0.3) !important;
+}
+
+/* 确保焦点元素在最上层 */
+.focusable:focus {
+    position: relative;
+    z-index: 10;
+}
+
+/* 焦点时的文字高亮 */
+.focusable:focus .text-gray-400,
+.focusable:focus .text-gray-500 {
+    color: white !important;
+}
+
+/* About页面的特殊焦点样式 */
+.about-page .focusable:focus {
+    outline: 3px solid #60a5fa !important;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.3) !important;
+}
+
+/* 确保在暗色背景下焦点可见 */
+.bg-\[#111\] .focusable:focus,
+.bg-\[#222\] .focusable:focus,
+.bg-\[#333\] .focusable:focus {
+    outline-color: #ff6b6b !important;
+    box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.5) !important;
+}
+
+/* 平滑滚动支持 */
+html {
+    scroll-behavior: smooth;
+}
+
+/* 为无障碍访问改进的焦点样式 */
+@media (prefers-reduced-motion: no-preference) {
+    .focusable:focus {
+        transition: all 0.2s ease-in-out;
+    }
+}
+
+/* 高对比度模式支持 */
+@media (prefers-contrast: high) {
+    .focusable:focus {
+        outline: 4px solid yellow !important;
+        outline-offset: 3px;
+        box-shadow: 0 0 0 3px black !important;
+    }
+}
