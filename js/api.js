@@ -548,9 +548,23 @@ async function handleMultipleCustomSearch(searchQuery, customApiUrls) {
     const originalFetch = window.fetch;
     
     window.fetch = async function(input, init) {
-        const requestUrl = typeof input === 'string' ? new URL(input, window.location.origin) : input.url;
+        let requestUrl;
         
-        if (requestUrl.pathname.startsWith('/api/')) {
+        // 正确处理URL构建
+        if (typeof input === 'string') {
+            // 如果是绝对URL，直接使用
+            if (input.startsWith('http://') || input.startsWith('https://')) {
+                requestUrl = new URL(input);
+            } else {
+                // 如果是相对URL，基于当前域名构建
+                requestUrl = new URL(input, window.location.origin);
+            }
+        } else {
+            requestUrl = input.url ? new URL(input.url) : input;
+        }
+        
+        // 只拦截本域的 /api/ 请求
+        if (requestUrl.origin === window.location.origin && requestUrl.pathname.startsWith('/api/')) {
             if (window.isPasswordProtected && window.isPasswordVerified) {
                 if (window.isPasswordProtected() && !window.isPasswordVerified()) {
                     return;
@@ -577,7 +591,7 @@ async function handleMultipleCustomSearch(searchQuery, customApiUrls) {
             }
         }
         
-        // 非API请求使用原始fetch
+        // 非本域API请求使用原始fetch
         return originalFetch.apply(this, arguments);
     };
 })();
