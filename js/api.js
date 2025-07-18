@@ -419,13 +419,18 @@ async function handleAggregatedSearch(searchQuery) {
             }
         });
         
-        // 按照视频名称和来源排序
+        // 按照视频名称、网速和来源排序
         uniqueResults.sort((a, b) => {
             // 首先按照视频名称排序
             const nameCompare = (a.vod_name || '').localeCompare(b.vod_name || '');
             if (nameCompare !== 0) return nameCompare;
             
-            // 如果名称相同，则按照来源排序
+            // 如果名称相同，则按照网速排序（网速好的排前面）
+            const speedA = a.speedTest?.speed || 0;
+            const speedB = b.speedTest?.speed || 0;
+            if (speedA !== speedB) return speedB - speedA; // 降序，速度快的在前
+            
+            // 如果网速也相同，则按照来源排序
             return (a.source_name || '').localeCompare(b.source_name || '');
         });
         

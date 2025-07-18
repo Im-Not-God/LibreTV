@@ -658,13 +658,18 @@ async function search() {
             }
         });
 
-        // 对搜索结果进行排序：按名称优先，名称相同时按接口源排序
+        // 对搜索结果进行排序：按名称优先，网速优先，名称相同时按接口源排序
         allResults.sort((a, b) => {
             // 首先按照视频名称排序
             const nameCompare = (a.vod_name || '').localeCompare(b.vod_name || '');
             if (nameCompare !== 0) return nameCompare;
             
-            // 如果名称相同，则按照来源排序
+            // 如果名称相同，则按照网速排序（网速好的排前面）
+            const speedA = a.speedTest?.speed || 0;
+            const speedB = b.speedTest?.speed || 0;
+            if (speedA !== speedB) return speedB - speedA; // 降序，速度快的在前
+            
+            // 如果网速也相同，则按照来源排序
             return (a.source_name || '').localeCompare(b.source_name || '');
         });
 
@@ -748,10 +753,13 @@ async function search() {
             // 修改为水平卡片布局，图片在左侧，文本在右侧，并优化样式
             const hasCover = item.vod_pic && item.vod_pic.startsWith('http');
 
+            // 生成测速显示内容
+            const speedDisplay = generateSpeedDisplay(item);
+
             return `
                 <div class="card-hover bg-[#111] rounded-lg overflow-hidden cursor-pointer transition-all hover:scale-[1.02] h-full shadow-sm hover:shadow-md" 
                      onclick="showDetails('${safeId}','${safeName}','${sourceCode}')" ${apiUrlAttr}>
-                    <div class="flex h-full">
+                    <div class="flex h-full relative">
                         ${hasCover ? `
                         <div class="relative flex-shrink-0 search-card-img-container">
                             <img src="${item.vod_pic}" alt="${safeName}" 
@@ -794,12 +802,30 @@ async function search() {
                                 -->
                             </div>
                         </div>
+                        
+                        <!-- 测速结果显示在右下角 -->
+                        <div class="absolute bottom-2 right-2 z-10" id="speed-${safeId}-${sourceCode}">
+                            ${speedDisplay}
+                        </div>
                     </div>
                 </div>
             `;
         }).join('');
 
         resultsDiv.innerHTML = safeResults;
+
+        // 为每个搜索结果启动自动测速
+        setTimeout(() => {
+            allResults.forEach(item => {
+                // 优先检查是否有vod_play_url，如果有则直接对视频资源测速
+                if (item.vod_play_url && item.vod_play_url.trim()) {
+                    startVideoSpeedTest(item);
+                } else if (item.source_code && (API_SITES[item.source_code] || item.api_url)) {
+                    // 如果没有vod_play_url，则对API接口测速
+                    startAutoSpeedTest(item);
+                }
+            });
+        }, 100);
     } catch (error) {
         console.error('搜索错误:', error);
         if (error.name === 'AbortError') {
@@ -1356,3 +1382,775 @@ function saveStringAsFile(content, fileName) {
 }
 
 // 移除Node.js的require语句，因为这是在浏览器环境中运行的
+
+// ==================== 自动测速功能 ====================
+
+// 存储测速结果的全局对象
+window.speedTestResults = new Map();
+window.speedTestingInProgress = new Set();
+
+/**
+ * 生成测速显示内容
+ * @param {Object} item - 搜索结果项
+ * @returns {string} HTML内容
+ */
+function generateSpeedDisplay(item) {
+    const speedResult = item.speedTest;
+    if (!speedResult) {
+        return `<div class="bg-gray-700 px-2 py-1 rounded text-xs text-gray-300">测速中...</div>`;
+    }
+    
+    if (speedResult.status === 'error') {
+        return `<div class="bg-red-600 px-2 py-1 rounded text-xs text-white" title="连接失败">连接异常</div>`;
+    }
+    
+    const speed = speedResult.speed;
+    const latency = speedResult.latency;
+    const testType = speedResult.testType || 'api'; // 默认为api测速
+    const note = speedResult.note; // 可能包含额外说明
+    let speedText, bgColor, displayText;
+    
+    // 处理警告状态（测速过程中有问题但不是完全失败）
+    if (speedResult.status === 'warning') {
+        speedText = '可用';
+        bgColor = 'bg-yellow-600';
+        displayText = `${speedText} ${latency}ms`;
+    } else if (speed >= 800) {
+        speedText = '极快';
+        bgColor = 'bg-green-600';
+        displayText = `${speedText} ${latency}ms`;
+    } else if (speed >= 400) {
+        speedText = '快速';
+        bgColor = 'bg-green-500';
+        displayText = `${speedText} ${latency}ms`;
+    } else if (speed >= 150) {
+        speedText = '中等';
+        bgColor = 'bg-yellow-500';
+        displayText = `${speedText} ${latency}ms`;
+    } else if (speed >= 50) {
+        speedText = '较慢';
+        bgColor = 'bg-orange-500';
+        displayText = `${speedText} ${latency}ms`;
+    } else {
+        speedText = '慢';
+        bgColor = 'bg-red-500';
+        displayText = `${speedText} ${latency}ms`;
+    }
+    
+    // 添加测速类型标识和说明
+    let typeIcon, title;
+    
+    switch (testType) {
+        case 'video':
+            typeIcon = '●';
+            title = '视频资源测速结果';
+            break;
+        case 'video-proxy':
+            typeIcon = '◐';
+            title = '视频资源测速结果（通过代理）';
+            break;
+        case 'domain':
+            typeIcon = '◑';
+            title = '域名连通性测试结果';
+            break;
+        case 'api':
+            typeIcon = '○';
+            title = 'API接口测速结果';
+            break;
+        case 'failed':
+            typeIcon = '△';
+            title = '测速受限';
+            break;
+        default:
+            typeIcon = '○';
+            title = 'API接口测速结果';
+    }
+    
+    // 如果有额外说明，添加到title中
+    if (note) {
+        title += ` - ${note}`;
+    }
+    
+    return `<div class="${bgColor} px-2 py-1 rounded text-xs text-white" title="${title}">${typeIcon} ${displayText}</div>`;
+}
+
+/**
+ * 开始视频资源测速（针对已有vod_play_url的情况）
+ * @param {Object} item - 搜索结果项
+ */
+async function startVideoSpeedTest(item) {
+    const sourceCode = item.source_code;
+    const testKey = `${sourceCode}_${item.vod_id}`;
+    
+    // 防止重复测试
+    if (window.speedTestingInProgress.has(testKey)) {
+        return;
+    }
+    
+    // 检查缓存结果（5分钟内有效）
+    const cached = window.speedTestResults.get(testKey);
+    if (cached && (Date.now() - cached.timestamp) < 300000) {
+        item.speedTest = cached;
+        updateSpeedDisplay(item);
+        return;
+    }
+    
+    window.speedTestingInProgress.add(testKey);
+    
+    try {
+        // 解析vod_play_url获取第一个视频链接进行测试
+        const firstVideoUrl = extractFirstVideoUrl(item.vod_play_url);
+        console.log(`开始测速视频资源 ${sourceCode} (${item.vod_id})，链接: ${firstVideoUrl}`);
+        if (!firstVideoUrl) {
+            throw new Error('无法从vod_play_url中提取有效的视频链接');
+        }
+        
+        const result = await performVideoSpeedTest(firstVideoUrl, sourceCode);
+        result.timestamp = Date.now();
+        
+        // 缓存结果
+        window.speedTestResults.set(testKey, result);
+        item.speedTest = result;
+        
+        // 更新显示
+        updateSpeedDisplay(item);
+        
+    } catch (error) {
+        console.warn(`视频资源 ${sourceCode} 测速失败:`, error);
+        
+        // 检查是否是CORS相关错误
+        const isCorsError = error.message.includes('CORS') || 
+                           error.message.includes('blocked') || 
+                           error.message.includes('视频连接失败') ||
+                           error.name === 'TypeError';
+        
+        // 如果视频资源测速失败，回退到API测速
+        try {
+            let testUrl;
+            if (item.api_url) {
+                testUrl = item.api_url;
+            } else if (API_SITES[sourceCode]) {
+                testUrl = API_SITES[sourceCode].api;
+            } else {
+                throw new Error('无可用的测速方式');
+            }
+            
+            const apiResult = await performApiSpeedTest(testUrl, sourceCode);
+            apiResult.timestamp = Date.now();
+            apiResult.testType = 'api'; // 标记这是API测速结果
+            
+            // 如果是CORS错误导致的回退，在结果中添加说明
+            if (isCorsError) {
+                apiResult.note = '视频CORS受限，使用API测速';
+            }
+            
+            window.speedTestResults.set(testKey, apiResult);
+            item.speedTest = apiResult;
+            updateSpeedDisplay(item);
+            
+        } catch (apiError) {
+            // 两种测速都失败的情况
+            const errorResult = {
+                speed: 20,
+                latency: 3000,
+                status: 'warning',
+                error: isCorsError ? 
+                    `CORS限制，无法直接测试视频资源; API测速失败: ${apiError.message}` :
+                    `视频测速失败: ${error.message}; API测速失败: ${apiError.message}`,
+                timestamp: Date.now(),
+                testType: 'failed',
+                note: isCorsError ? 'CORS受限' : '连接失败'
+            };
+            
+            window.speedTestResults.set(testKey, errorResult);
+            item.speedTest = errorResult;
+            updateSpeedDisplay(item);
+        }
+        
+    } finally {
+        window.speedTestingInProgress.delete(testKey);
+    }
+}
+
+/**
+ * 从vod_play_url中提取最佳的视频链接（优先m3u8格式）
+ * @param {string} vodPlayUrl - 播放链接字符串
+ * @returns {string|null} 最佳视频URL或null
+ */
+function extractFirstVideoUrl(vodPlayUrl) {
+    if (!vodPlayUrl || typeof vodPlayUrl !== 'string') {
+        return null;
+    }
+    
+    // 使用正则表达式提取所有HTTP(S)链接
+    const urlRegex = /https?:\/\/[^\s#$]+/g;
+    const allUrls = vodPlayUrl.match(urlRegex);
+    
+    if (!allUrls || allUrls.length === 0) {
+        return null;
+    }
+    
+    // 按优先级分类链接
+    const m3u8Urls = [];
+    const mp4Urls = [];
+    const otherVideoUrls = [];
+    const otherUrls = [];
+    
+    allUrls.forEach(url => {
+        if (url.includes('.m3u8')) {
+            m3u8Urls.push(url);
+        } else if (url.includes('.mp4')) {
+            mp4Urls.push(url);
+        } else if (/\.(flv|avi|mkv|mov|wmv|ts|m4v|webm)($|\?)/i.test(url)) {
+            otherVideoUrls.push(url);
+        } else {
+            otherUrls.push(url);
+        }
+    });
+    
+    // 按优先级返回：m3u8 > mp4 > 其他视频格式 > 其他链接
+    if (m3u8Urls.length > 0) {
+        return m3u8Urls[0];
+    } else if (mp4Urls.length > 0) {
+        return mp4Urls[0];
+    } else if (otherVideoUrls.length > 0) {
+        return otherVideoUrls[0];
+    } else {
+        return otherUrls[0];
+    }
+}
+
+/**
+ * 执行视频资源速度测试
+ * @param {string} videoUrl - 视频URL
+ * @param {string} sourceCode - 数据源代码
+ * @returns {Promise<Object>} 测试结果
+ */
+async function performVideoSpeedTest(videoUrl, sourceCode) {
+    const startTime = performance.now();
+    
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        
+        // 首先尝试直接HEAD请求
+        let response;
+        let usedProxy = false;
+        
+        try {
+            response = await fetch(videoUrl, {
+                method: 'HEAD',
+                signal: controller.signal,
+                cache: 'no-cache',
+                mode: 'cors'
+            });
+        } catch (corsError) {
+            // 如果CORS失败，尝试通过代理测试
+            if (corsError.message.includes('CORS') || corsError.message.includes('blocked') || corsError.name === 'TypeError') {
+                console.log(`视频URL ${videoUrl} 出现CORS错误，尝试通过代理测试:`, corsError.message);
+                try {
+                    // 使用现有的代理进行测试
+                    const proxyUrl = PROXY_URL + encodeURIComponent(videoUrl);
+                    console.log(`使用代理URL: ${proxyUrl}`);
+                    response = await fetch(proxyUrl, {
+                        method: 'HEAD',
+                        signal: controller.signal,
+                        cache: 'no-cache'
+                    });
+                    usedProxy = true;
+                } catch (proxyError) {
+                    // 代理也失败，进行域名连通性测试
+                    return await performDomainConnectivityTest(videoUrl, sourceCode, startTime);
+                }
+            } else {
+                throw corsError;
+            }
+        }
+        
+        clearTimeout(timeoutId);
+        const endTime = performance.now();
+        const latency = Math.round(endTime - startTime);
+        
+        // 根据响应时间和状态码计算速度
+        let speed;
+        if (response.ok) {
+            if (latency < 300) {
+                speed = 1000; // 极快
+            } else if (latency < 600) {
+                speed = 500; // 快速
+            } else if (latency < 1200) {
+                speed = 200; // 中等
+            } else {
+                speed = 50; // 较慢
+            }
+            
+            // 如果使用了代理，速度稍微降低
+            if (usedProxy) {
+                speed = Math.max(speed * 0.8, 20);
+            }
+        } else {
+            speed = 20; // 连接有问题
+        }
+        
+        return {
+            speed: Math.round(speed),
+            latency: latency,
+            status: 'success',
+            sourceKey: sourceCode,
+            testType: usedProxy ? 'video-proxy' : 'video', // 标记测试方式
+            note: usedProxy ? '通过代理测试' : undefined
+        };
+        
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            throw new Error('视频连接超时');
+        }
+        throw new Error(`视频连接失败: ${error.message}`);
+    }
+}
+
+/**
+ * 执行域名连通性测试（当视频URL无法直接访问时的备用方案）
+ * @param {string} videoUrl - 视频URL
+ * @param {string} sourceCode - 数据源代码
+ * @param {number} startTime - 开始时间
+ * @returns {Promise<Object>} 测试结果
+ */
+async function performDomainConnectivityTest(videoUrl, sourceCode, startTime) {
+    try {
+        // 提取域名
+        const url = new URL(videoUrl);
+        const domain = url.hostname;
+        
+        // 测试域名的根路径连通性
+        const testUrl = `${url.protocol}//${domain}/`;
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
+        const response = await fetch(PROXY_URL + encodeURIComponent(testUrl), {
+            method: 'HEAD',
+            signal: controller.signal,
+            cache: 'no-cache'
+        });
+        
+        clearTimeout(timeoutId);
+        const endTime = performance.now();
+        const latency = Math.round(endTime - startTime);
+        
+        // 域名连通性测试成功，给予基础速度
+        const baseSpeed = response.ok ? 100 : 30;
+        const speed = Math.max(baseSpeed - (latency / 20), 20);
+        
+        return {
+            speed: Math.round(speed),
+            latency: latency,
+            status: 'success',
+            sourceKey: sourceCode,
+            testType: 'domain',
+            note: '域名连通性测试'
+        };
+        
+    } catch (error) {
+        // 连域名都无法连接，返回最低速度
+        const endTime = performance.now();
+        const latency = Math.round(endTime - startTime);
+        
+        return {
+            speed: 10,
+            latency: latency,
+            status: 'warning',
+            sourceKey: sourceCode,
+            testType: 'failed',
+            note: 'CORS受限，连通性未知'
+        };
+    }
+}
+
+/**
+ * 开始自动测速
+ * @param {Object} item - 搜索结果项
+ */
+async function startAutoSpeedTest(item) {
+    const sourceCode = item.source_code;
+    const testKey = `${sourceCode}_${item.vod_id}`;
+    
+    // 防止重复测试
+    if (window.speedTestingInProgress.has(testKey)) {
+        return;
+    }
+    
+    // 检查缓存结果（5分钟内有效）
+    const cached = window.speedTestResults.get(testKey);
+    if (cached && (Date.now() - cached.timestamp) < 300000) {
+        item.speedTest = cached;
+        updateSpeedDisplay(item);
+        return;
+    }
+    
+    window.speedTestingInProgress.add(testKey);
+    
+    try {
+        let testUrl;
+        
+        // 获取测试URL
+        if (item.api_url) {
+            // 自定义API
+            testUrl = item.api_url;
+        } else if (API_SITES[sourceCode]) {
+            // 内置API
+            testUrl = API_SITES[sourceCode].api;
+        } else {
+            throw new Error('无效的数据源');
+        }
+        
+        const result = await performApiSpeedTest(testUrl, sourceCode);
+        result.timestamp = Date.now();
+        
+        // 缓存结果
+        window.speedTestResults.set(testKey, result);
+        item.speedTest = result;
+        
+        // 更新显示
+        updateSpeedDisplay(item);
+        
+    } catch (error) {
+        console.warn(`API ${sourceCode} 测速失败:`, error);
+        
+        // 即使测速失败，我们也给一个基础的结果，而不是完全失败
+        const errorResult = {
+            speed: 30, // 给一个基础速度，表示连接可能有问题但不是完全不可用
+            latency: 2000, // 高延迟
+            status: 'warning', // 改为警告而不是错误
+            error: error.message,
+            timestamp: Date.now()
+        };
+        
+        window.speedTestResults.set(testKey, errorResult);
+        item.speedTest = errorResult;
+        updateSpeedDisplay(item);
+        
+    } finally {
+        window.speedTestingInProgress.delete(testKey);
+    }
+}
+
+/**
+ * 执行API速度测试
+ * @param {string} apiUrl - API地址
+ * @param {string} sourceCode - 数据源代码
+ * @returns {Promise<Object>} 测试结果
+ */
+async function performApiSpeedTest(apiUrl, sourceCode) {
+    const startTime = performance.now();
+    
+    try {
+        // 测试延迟和响应速度
+        const testResult = await testApiResponse(apiUrl);
+        
+        const endTime = performance.now();
+        
+        return {
+            speed: testResult.speed, // KB/s
+            latency: testResult.latency, // ms
+            status: 'success',
+            totalTime: endTime - startTime,
+            sourceKey: sourceCode
+        };
+    } catch (error) {
+        throw new Error(`测速失败: ${error.message}`);
+    }
+}
+
+/**
+ * 测试API响应（延迟和速度）
+ * @param {string} apiUrl - API地址
+ * @returns {Promise<Object>} 测试结果
+ */
+async function testApiResponse(apiUrl) {
+    const startTime = performance.now();
+    
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        
+        // 使用实际的搜索API进行测试，这样更真实
+        const testUrl = `${apiUrl}${API_CONFIG.search.path}test`;
+        const response = await fetch(PROXY_URL + encodeURIComponent(testUrl), {
+            headers: API_CONFIG.search.headers,
+            signal: controller.signal,
+            cache: 'no-cache'
+        });
+        
+        clearTimeout(timeoutId);
+        const endTime = performance.now();
+        const duration = endTime - startTime;
+        
+        // 计算延迟
+        const latency = Math.round(duration);
+        
+        // 计算速度（基于响应时间估算）
+        let speed;
+        if (response.ok) {
+            // 如果响应成功，根据延迟估算速度等级
+            if (latency < 200) {
+                speed = 1000; // 快速
+            } else if (latency < 500) {
+                speed = 500; // 中等
+            } else if (latency < 1000) {
+                speed = 200; // 较慢
+            } else {
+                speed = 50; // 很慢
+            }
+        } else {
+            // 即使API返回错误，如果能连通也算一定速度
+            if (latency < 1000) {
+                speed = 100; // 能连通但可能有问题
+            } else {
+                speed = 10; // 几乎无法使用
+            }
+        }
+        
+        return {
+            latency: latency,
+            speed: speed,
+            status: 'success'
+        };
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            throw new Error('连接超时');
+        }
+        // 对于网络错误，我们仍然可以提供一个基础的测速结果
+        const endTime = performance.now();
+        const duration = endTime - startTime;
+        
+        // 如果是快速失败（比如DNS解析失败），给个很低的分数
+        return {
+            latency: Math.round(duration),
+            speed: 5, // 很低的速度
+            status: 'warning'
+        };
+    }
+}
+
+/**
+ * 更新速度显示
+ * @param {Object} item - 搜索结果项
+ */
+function updateSpeedDisplay(item) {
+    const safeId = item.vod_id ? item.vod_id.toString().replace(/[^\w-]/g, '') : '';
+    const sourceCode = item.source_code || '';
+    const speedElement = document.getElementById(`speed-${safeId}-${sourceCode}`);
+    
+    if (speedElement) {
+        speedElement.innerHTML = generateSpeedDisplay(item);
+    }
+}
+
+/**
+ * 全局速度测试器对象，供播放器使用
+ */
+window.speedTester = {
+    /**
+     * 测试视频源速度
+     * @param {string} videoUrl - 视频URL
+     * @param {string} sourceKey - 源标识
+     * @returns {Promise<Object>} 测试结果
+     */
+    async testVideoSource(videoUrl, sourceKey) {
+        try {
+            // 对视频URL进行测速，这里使用HEAD请求测试连接性
+            const startTime = performance.now();
+            
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 6000);
+            
+            let response;
+            let usedProxy = false;
+            
+            try {
+                response = await fetch(videoUrl, {
+                    method: 'HEAD',
+                    signal: controller.signal,
+                    cache: 'no-cache',
+                    mode: 'cors'
+                });
+            } catch (corsError) {
+                // 如果CORS失败，尝试通过代理测试
+                if (corsError.message.includes('CORS') || corsError.message.includes('blocked') || corsError.name === 'TypeError') {
+                    console.log(`播放器视频URL ${videoUrl} 出现CORS错误，尝试通过代理测试:`, corsError.message);
+                    try {
+                        // 使用现有的代理进行测试
+                        const proxyUrl = PROXY_URL + encodeURIComponent(videoUrl);
+                        response = await fetch(proxyUrl, {
+                            method: 'HEAD',
+                            signal: controller.signal,
+                            cache: 'no-cache'
+                        });
+                        usedProxy = true;
+                    } catch (proxyError) {
+                        throw corsError; // 使用原始CORS错误
+                    }
+                } else {
+                    throw corsError;
+                }
+            }
+            
+            clearTimeout(timeoutId);
+            const endTime = performance.now();
+            const latency = Math.round(endTime - startTime);
+            
+            // 根据响应时间和状态码计算速度
+            let speed;
+            if (response.ok) {
+                if (latency < 300) {
+                    speed = 1000; // 极快
+                } else if (latency < 600) {
+                    speed = 500; // 快速
+                } else if (latency < 1200) {
+                    speed = 200; // 中等
+                } else {
+                    speed = 50; // 较慢
+                }
+                
+                // 如果使用了代理，速度稍微降低
+                if (usedProxy) {
+                    speed = Math.max(speed * 0.8, 20);
+                }
+            } else {
+                speed = 20; // 连接有问题
+            }
+            
+            return {
+                status: 'success',
+                speed: Math.round(speed),
+                latency: latency,
+                sourceKey: sourceKey,
+                testType: usedProxy ? 'video-proxy' : 'video',
+                note: usedProxy ? '通过代理测试' : undefined
+            };
+            
+        } catch (error) {
+            // 对于网络错误，仍然提供基础信息
+            const endTime = performance.now();
+            const latency = Math.round(endTime - Date.now());
+            
+            const isCorsError = error.message.includes('CORS') || 
+                               error.message.includes('blocked') || 
+                               error.name === 'TypeError';
+            
+            return {
+                status: 'error',
+                speed: 5,
+                latency: latency > 6000 ? 6000 : latency,
+                sourceKey: sourceKey,
+                error: error.message,
+                testType: 'failed',
+                note: isCorsError ? 'CORS受限' : '连接失败'
+            };
+        }
+    },
+    
+    /**
+     * 批量测试多个资源
+     * @param {Array} resources - 资源列表 [{url, sourceKey, name}]
+     * @param {Function} progressCallback - 进度回调
+     * @returns {Promise<Array>} 测试结果列表
+     */
+    async testMultipleResources(resources, progressCallback) {
+        const results = [];
+        let completed = 0;
+        
+        // 并发测试，但限制并发数量
+        const concurrency = 3;
+        const chunks = [];
+        
+        for (let i = 0; i < resources.length; i += concurrency) {
+            chunks.push(resources.slice(i, i + concurrency));
+        }
+        
+        for (const chunk of chunks) {
+            const chunkPromises = chunk.map(async (resource) => {
+                try {
+                    const result = await this.testVideoSource(resource.url, resource.sourceKey);
+                    completed++;
+                    if (progressCallback) {
+                        progressCallback(completed, resources.length);
+                    }
+                    return result;
+                } catch (error) {
+                    completed++;
+                    if (progressCallback) {
+                        progressCallback(completed, resources.length);
+                    }
+                    return {
+                        status: 'error',
+                        speed: 5,
+                        latency: 5000,
+                        sourceKey: resource.sourceKey,
+                        error: error.message
+                    };
+                }
+            });
+            
+            const chunkResults = await Promise.all(chunkPromises);
+            results.push(...chunkResults);
+        }
+        
+        return results;
+    },
+    
+    /**
+     * 获取速度等级信息
+     * @param {number} speed - 速度值
+     * @returns {Object} 速度等级信息
+     */
+    getSpeedGrade(speed) {
+        if (speed >= 800) {
+            return {
+                grade: 'excellent',
+                icon: '🟢',
+                color: '#10b981',
+                text: '极快'
+            };
+        } else if (speed >= 400) {
+            return {
+                grade: 'good',
+                icon: '🟡',
+                color: '#10b981',
+                text: '快速'
+            };
+        } else if (speed >= 150) {
+            return {
+                grade: 'normal',
+                icon: '🟠',
+                color: '#f59e0b',
+                text: '中等'
+            };
+        } else if (speed >= 50) {
+            return {
+                grade: 'slow',
+                icon: '🔴',
+                color: '#f97316',
+                text: '较慢'
+            };
+        } else {
+            return {
+                grade: 'very-slow',
+                icon: '⚫',
+                color: '#ef4444',
+                text: '慢'
+            };
+        }
+    },
+    
+    /**
+     * 格式化速度显示
+     * @param {number} speed - 速度值
+     * @returns {string} 格式化后的速度文本
+     */
+    formatSpeed(speed) {
+        const grade = this.getSpeedGrade(speed);
+        return grade.text;
+    }
+};
